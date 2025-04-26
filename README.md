@@ -1,7 +1,7 @@
 ## Screenshots of graphs used to assist in building:
 # Algorithms used:
-- Ray Casting
-<br />
+- Ray Casting <br />
+
 **Map of E1M1 plotted using ggplot**<br />
 ![image](https://github.com/user-attachments/assets/93905814-23bd-43fe-9559-a99890f74d51)
 <br />
