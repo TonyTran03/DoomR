@@ -220,3 +220,42 @@ ggplot(rays) +
 
 
 
+
+
+intersect_ray_segment <- function(px, py, dx, dy, x1, y1, x2, y2) {
+  sx <- x2 - x1
+  sy <- y2 - y1
+  
+  D <- dx * sy - dy * sx
+  
+  if (D == 0) {
+    # Parallel lines
+    return(NULL)
+  }
+  Dt = (x1-px)*sy - (y1-py)(sx)
+  Du = dx*(y1-py) - (dy)(x1-px)
+  # t is the scaling for length of ray hits the wall (t>= 0)
+  t = Dt/D
+  # u is the scaling for where the ray hits u:(0,1)
+    #we have to know if ray hit is inside the wall segment.
+  u = Du/D
+  
+
+  if(t >=0 && u >= 0 && u<= 1){
+    #(x,y) = (px,py) + t (dx,dy)
+    intersection_x = px + t*dx
+    intersection_y = py + t*dy
+    
+    distance = sqrt((intersection_x-px)^2 + (intersection_y-py)^2 )
+    
+    
+    return (
+      list(x = intersection_x, y = intersection_y, dist = distance)
+    )
+  }
+  
+  else{
+    return(NULL)
+  }
+}
+
