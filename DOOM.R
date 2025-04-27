@@ -139,7 +139,7 @@ player <- list(
 )
 
 fov <- pi / 2   # 90 field of view
-n_rays <- 320 
+n_rays <- 1024
 
 # Creating a sequence (e.g. 1, 2, 3,...,) from the top and bottom of my 
 #   cone pov separated by number of rows 
@@ -232,8 +232,8 @@ intersect_ray_segment <- function(px, py, dx, dy, x1, y1, x2, y2) {
     # Parallel lines
     return(NULL)
   }
-  Dt = (x1-px)*sy - (y1-py)(sx)
-  Du = dx*(y1-py) - (dy)(x1-px)
+  Dt = (x1-px)*sy - (y1-py)*(sx)
+  Du = dx*(y1-py) - (dy)*(x1-px)
   # t is the scaling for length of ray hits the wall (t>= 0)
   t = Dt/D
   # u is the scaling for where the ray hits u:(0,1)
@@ -259,3 +259,81 @@ intersect_ray_segment <- function(px, py, dx, dy, x1, y1, x2, y2) {
   }
 }
 
+screen_width <- 640
+screen_height <- 480
+half_screen <- screen_height / 2
+# 1) Rebuild slice_data to include linedef
+slice_data <- data.frame(
+  x       = numeric(0),
+  y1      = numeric(0),
+  y2      = numeric(0),
+  linedef = integer(0)
+)
+
+for (i in seq_len(n_rays)) {
+  ray_dx <- rays$dx[i]
+  ray_dy <- rays$dy[i]
+  nearest_dist  <- Inf
+  nearest_res   <- NULL
+  nearest_index <- NA
+  
+  for (j in seq_len(nrow(walls))) {
+    w   <- walls[j, ]
+    res <- intersect_ray_segment(
+      px = player$x, py = player$y,
+      dx = ray_dx,    dy = ray_dy,
+      x1 = w$x1,      y1 = w$y1,
+      x2 = w$x2,      y2 = w$y2
+    )
+    if (!is.null(res) && res$dist < nearest_dist) {
+      nearest_dist  <- res$dist
+      nearest_res   <- res
+      nearest_index <- j
+    }
+  }
+  
+  if (!is.na(nearest_index)) {
+    cat(sprintf(
+      "Ray %3d @ angle %.2f → walls[%d] (linedef %d) dist=%.1f\n",
+      i,
+      angles[i],
+      nearest_index,
+      segs$linedef[nearest_index],
+      nearest_distance
+    ))
+    # fisheye + height exactly as before
+    cd  <- nearest_dist * cos(angles[i] - player$angle)
+    h   <- 25000 / cd
+    h   <- min(h, screen_height)
+    x_p <- (i / n_rays) * screen_width
+    
+    slice_data <- rbind(slice_data, data.frame(
+      x       = x_p,
+      y1      = -h/2,
+      y2      =  h/2,
+      linedef = segs$linedef[nearest_index]
+    ))
+  }
+}
+
+# 2) Plot, colouring by linedef
+ggplot(slice_data) +
+  geom_segment(aes(
+    x      = x,
+    y      = y1,
+    xend   = x,
+    yend   = y2,
+    colour = factor(linedef)
+  ), size = 0.7) +
+  scale_colour_viridis_d(
+    option = "turbo",
+    name   = "Linedef"            # <- this adds a legend title
+  ) +
+  coord_fixed(ratio = 1) +
+  theme_void() +
+  theme(
+    panel.background = element_rect(fill = "black"),
+    legend.position   = "right",   # or "bottom", "top", etc.
+    legend.title      = element_text(color="black"),
+    legend.text       = element_text(color="black")
+  )
