@@ -218,10 +218,6 @@ ggplot(rays) +
 
 
 
-
-
-
-
 intersect_ray_segment <- function(px, py, dx, dy, x1, y1, x2, y2) {
   sx <- x2 - x1
   sy <- y2 - y1
@@ -299,7 +295,7 @@ for (i in seq_len(n_rays)) {
       angles[i],
       nearest_index,
       segs$linedef[nearest_index],
-      nearest_distance
+      nearest_dist
     ))
     # fisheye + height exactly as before
     cd  <- nearest_dist * cos(angles[i] - player$angle)
@@ -337,3 +333,154 @@ ggplot(slice_data) +
     legend.title      = element_text(color="black"),
     legend.text       = element_text(color="black")
   )
+
+
+
+
+  read_nodes <- function(wad_path, lump_info) {
+    con <- file(wad_path, "rb")
+    seek(con, where = lump_info$offset, origin = "start")
+    
+    n_bytes_per_node <- 28
+    n_nodes <- lump_info$size %/% n_bytes_per_node
+    
+    # 14 2-byte integers per node
+    raw_ints <- readBin(con, integer(), n = n_nodes * 14, size = 2, signed = TRUE, endian = "little")
+    close(con)
+    
+    node_mat <- matrix(raw_ints, ncol = 14, byrow = TRUE)
+    colnames(node_mat) <- c(
+      "x", "y", "dx", "dy",
+      "bbox0_top", "bbox0_bottom", "bbox0_left", "bbox0_right",
+      "bbox1_top", "bbox1_bottom", "bbox1_left", "bbox1_right",
+      "right_child", "left_child"
+    )
+    as.data.frame(node_mat)
+  }
+
+nodes_lump <- map_data[7, ]
+nodes <- read_nodes(wad_path, nodes_lump)
+
+is_point_on_front_side <- function(px, py, node) {
+  dx <- node$dx[1]
+  dy <- node$dy[1]
+  x  <- node$x[1]
+  y  <- node$y[1]
+  
+  return(((px - x) * dy - (py - y) * dx) <= 0)
+}
+
+# Total number of nodes
+n_nodes <- nrow(nodes)
+
+traverse_bsp <- function(node_index, px, py) {
+  if (node_index[1] >= 32768) {
+    ssector_index <- node_index - 32768
+    if (ssector_index >= 0 && ssector_index < nrow(ssectors)) {
+      draw_ssector(ssector_index, walls, segs, ssectors)
+    } else {
+      cat("Invalid SSECTOR index:", ssector_index, "\n")
+    }
+    return()
+  }
+  
+  node <- nodes[node_index + 1, ]  # R is 1-indexed
+  
+  if (is_point_on_front_side(px, py, node)) {
+    # Player is on the front side → draw back first
+    traverse_bsp(node$left_child,  px, py)
+    traverse_bsp(node$right_child, px, py)
+  } else {
+    # Player is on the back side → draw front first
+    traverse_bsp(node$right_child, px, py)
+    traverse_bsp(node$left_child,  px, py)
+  }
+}
+
+# Call this with player position
+traverse_bsp(0, player$x, player$y)
+
+
+read_ssectors <- function(wad_path, lump_info) {
+  con <- file(wad_path, "rb")
+  seek(con, where = lump_info$offset, origin = "start")
+  
+  n_bytes_per_ssector <- 4
+  n_ssectors <- lump_info$size %/% n_bytes_per_ssector
+  
+  raw_ints <- readBin(con, integer(), n = n_ssectors * 2,
+                      size = 2, signed = FALSE, endian = "little")
+  close(con)
+  
+  ssectors <- matrix(raw_ints, ncol = 2, byrow = TRUE)
+  colnames(ssectors) <- c("num_segs", "first_seg_index")
+  as.data.frame(ssectors)
+}
+
+# Load SSECTORS
+ssectors_lump <- map_data[6, ]  # "SSECTORS" is the 6th lump after E1M1
+ssectors <- read_ssectors(wad_path, ssectors_lump)
+
+
+draw_ssector <- function(ssector_index, walls, segs, ssectors) {
+  entry <- ssectors[ssector_index + 1, ]  # R is 1-indexed
+  num_segs <- entry$num_segs
+  start_idx <- entry$first_seg_index
+  
+  for (i in 0:(num_segs - 1)) {
+    seg_index <- start_idx + i
+    wall <- walls[seg_index + 1, ]
+    linedef <- segs$linedef[seg_index + 1]
+    
+    cat(sprintf("Drawing SEG %d (linedef %d): (%d,%d) → (%d,%d)\n",
+                seg_index, linedef, wall$x1, wall$y1, wall$x2, wall$y2))
+    
+    # Optionally collect segments for plotting
+  }
+}
+
+is_subsector <- function(index) {
+  bitwAnd(index, 0x8000) != 0
+}
+
+get_index <- function(index) {
+  bitwAnd(index, 0x7FFF)
+}
+traverse_bsp <- function(node_index, px, py, walls, segs, nodes, ssectors) {
+  node_index <- as.integer(node_index[1])  # Ensure scalar
+  
+  if (is_subsector(node_index)) {
+    ssector_index <- get_index(node_index)
+    
+    if (ssector_index >= 0 && ssector_index < nrow(ssectors)) {
+      cat(sprintf("Reached SSECTOR %d\n", ssector_index))
+      draw_ssector(ssector_index, walls, segs, ssectors)
+    } else {
+      cat(sprintf("Invalid SSECTOR index: %d\n", ssector_index))
+    }
+    return()
+  }
+  
+  if (node_index < 0 || node_index >= nrow(nodes)) {
+    cat(sprintf("Invalid NODE index: %d\n", node_index))
+    return()
+  }
+  
+  node <- nodes[node_index + 1, ]  # R is 1-indexed
+  
+  # Determine which side of the partition the player is on
+  if (is_point_on_front_side(px, py, node)) {
+    # Player is in front of the partition line → draw back first
+    traverse_bsp(node$left_child,  px, py, walls, segs, nodes, ssectors)
+    traverse_bsp(node$right_child, px, py, walls, segs, nodes, ssectors)
+  } else {
+    # Player is behind the partition line → draw front first
+    traverse_bsp(node$right_child, px, py, walls, segs, nodes, ssectors)
+    traverse_bsp(node$left_child,  px, py, walls, segs, nodes, ssectors)
+  }
+}
+
+
+traverse_bsp(0, player$x, player$y, walls, segs, nodes, ssectors)
+
+
